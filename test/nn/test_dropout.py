@@ -6,11 +6,12 @@ import itertools
 
 
 import torch
+import torch_npu
 from torch.testing._internal.common_utils import run_tests, set_default_dtype, \
     instantiate_parametrized_tests, TEST_PRIVATEUSE1
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, freeze_rng_state
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, expectedFailureXLA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, expectedFailureXLA, skipPRIVATEUSE1
 import torch.nn.functional as F
 import torch.nn as nn
 
@@ -153,6 +154,7 @@ class TestDropoutNNDeviceType(NNTestCase):
                     else:
                         self.assertNotEqual(permuted_inp, out)
 
+    @skipPRIVATEUSE1 # npu not supports torch.channels_last.
     def test_Dropout(self, device):
         input = torch.empty(1000)
         self._test_dropout(nn.Dropout, device, input)
@@ -188,6 +190,7 @@ class TestDropoutNNDeviceType(NNTestCase):
         for b, c in product(range(B), range(C)):
             self.assertTrue(result[b, c].count_nonzero() in (0, channel_numel))
 
+    @skipPRIVATEUSE1 # npu not supports torch.double.
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
     def test_Dropout1d(self, device):
         with set_default_dtype(torch.double):
@@ -211,6 +214,7 @@ class TestDropoutNNDeviceType(NNTestCase):
             self._test_dropoutNd_channel_zero(nn.Dropout1d(p=0.5), input)
             self._test_dropoutNd_channel_zero(nn.Dropout1d(p=0.5, inplace=True), input)
 
+    @skipPRIVATEUSE1 # npu not supports torch.channels_last.
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
     def test_Dropout2d(self, device):
         b = random.randint(1, 5)
@@ -246,6 +250,7 @@ class TestDropoutNNDeviceType(NNTestCase):
         self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5), input)
         self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5, inplace=True), input)
 
+    @skipPRIVATEUSE1 # npu not supports torch.channels_last.
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)

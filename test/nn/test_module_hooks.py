@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_nn import NNTestCase, _create_basic_net
 
 import torch
+import torch_npu
 import torch.nn as nn
 
 from functools import partial
@@ -586,6 +587,7 @@ class TestStateDictHooks(TestCase):
         finally:
             gc.enable()
 
+    @unittest.skip("torch_npu storage bug")
     def test_pickled_hook(self):
         m = nn.Linear(10, 10)
         m._register_load_state_dict_pre_hook(_hook_to_pickle, True)

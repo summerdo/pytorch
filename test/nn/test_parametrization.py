@@ -4,7 +4,7 @@ from itertools import product
 import pickle
 
 import torch
-
+import torch_npu
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init

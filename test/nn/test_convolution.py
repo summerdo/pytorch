@@ -6,6 +6,7 @@ import warnings
 from itertools import product
 
 import torch
+import torch_npu
 
 import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
@@ -16,7 +17,7 @@ from torch.testing._internal.common_utils import run_tests, \
     skipIfRocmVersionLessThan, TEST_SCIPY, TEST_WITH_ROCM, \
     download_file, parametrize as parametrize_test, subtest, \
     instantiate_parametrized_tests, set_default_dtype, TEST_PRIVATEUSE1, \
-    custom_device_mod, TEST_DEVICE
+    custom_device_mod
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
 from torch.testing._internal.common_nn import NNTestCase, _test_module_empty_input
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
@@ -24,7 +25,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCUDAIfRocm, skipCUDAIfRocmVersionLessThan, \
     onlyNativeDeviceTypes, largeTensorTest, skipMeta, \
     disableMkldnn, skipCPUIfNoMkldnn, disablecuDNN, skipCUDAIfMiopen, skipCUDAIfNoMiopen, \
-    onlyCUDAAndPRIVATEUSE1
+    onlyCUDAAndPRIVATEUSE1, skipPRIVATEUSE1, dtypesIfPRIVATEUSE1
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import gradcheck, gradgradcheck, \
@@ -38,6 +39,14 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 if TEST_SCIPY:
     import scipy.signal
     import scipy.ndimage
+
+def _check_available_device():
+    if TEST_CUDA:
+        return 'cuda'
+    elif TEST_PRIVATEUSE1:
+        return torch._C._get_privateuse1_backend_name()
+
+TEST_DEVICE = _check_available_device()
 
 class TestConvolutionNN(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -352,6 +361,7 @@ class TestConvolutionNN(NNTestCase):
             bias=True).to(TEST_DEVICE)
         result = m(x)
 
+    @unittest.skip("npu not support double.")
     @unittest.skipIf(not (TEST_CUDA or TEST_PRIVATEUSE1), 'CUDA and PrivateUse1 not available')
     @unittest.skipIf(not (TEST_CUDNN or TEST_PRIVATEUSE1), 'CUDNN and PrivateUse1 not available')
     def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
@@ -634,6 +644,7 @@ class TestConvolutionNN(NNTestCase):
 
             gradcheck(lambda i, w, b, pad: F.conv_tbc(i, w, b, pad), (inp, weight, bias, 3))
 
+    @unittest.skip("npu not support torch.channels_last.")
     @unittest.skipIf(not (TEST_CUDA or TEST_PRIVATEUSE1), "CUDA and PrivateUse1 unavailable")
     @unittest.skipIf(not (TEST_CUDNN or TEST_PRIVATEUSE1), "needs cudnn or PrivateUse1")
     @skipIfRocmVersionLessThan((4, 3))
@@ -672,6 +683,7 @@ class TestConvolutionNN(NNTestCase):
         self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
 
 
+    @unittest.skip("npu not support double")
     @unittest.skipIf(not (TEST_CUDA or TEST_PRIVATEUSE1), "CUDA and PrivateUse1 unavailable")
     def test_cudnn_noncontiguous_weight(self):
         # Noncontiguous weights must be contiguous() before being
@@ -895,6 +907,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
         return gradgradcheck(func, inputs, (grad_y,))
 
+    @dtypesIfPRIVATEUSE1(torch.half, torch.float)
     @onlyCUDAAndPRIVATEUSE1
     @skipCUDAIfNoCudnn
     @dtypes(*floating_and_complex_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
@@ -914,7 +927,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertEqual(conv1.bias.grad.data, conv2.bias.grad.data, atol=0.0, rtol=0)
             self.assertEqual(conv1.weight.grad.data, conv2.weight.grad.data, atol=0.0, rtol=0)
 
-
+    @dtypesIfPRIVATEUSE1(torch.half, torch.float)
     @onlyCUDAAndPRIVATEUSE1
     @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_Conv2d_large_workspace(self, device, dtype):
@@ -959,6 +972,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             custom_device_mod.synchronize()
 
 
+    @dtypesIfPRIVATEUSE1(torch.float, torch.half)
     @onlyCUDAAndPRIVATEUSE1
     @dtypes(torch.float, torch.double, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
@@ -1003,6 +1017,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                                         m2.weight.grad.data], 0),
                              atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
+    @skipPRIVATEUSE1
     @onlyCUDAAndPRIVATEUSE1
     @dtypes(torch.float, torch.double, torch.half)
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
@@ -1047,7 +1062,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                                         m2.weight.grad.data], 0),
                              atol=atol, rtol=rtol)
 
-
+    @dtypesIfPRIVATEUSE1(torch.half, torch.float)
     @onlyCUDAAndPRIVATEUSE1
     @dtypes(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     def test_noncontig_conv_grad(self, device, dtype):
@@ -1066,6 +1081,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         output.backward(grad.contiguous())
         self.assertEqual(result, input.grad.data, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
+    @skipPRIVATEUSE1
     @onlyCUDAAndPRIVATEUSE1
     @dtypes(torch.double)
     def test_conv_double_backward(self, device, dtype):
@@ -1156,6 +1172,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                                                batch_size, inp_size, dilation,
                                                no_weight)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.cfloat)
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
     def test_conv1d_same_padding(self, device, dtype):
@@ -1196,6 +1213,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv1d(x, y, padding='same', dilation=3)
         self.assertEqual(expect, actual)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.cfloat)
     def test_conv2d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
@@ -1222,6 +1240,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv2d(x, y, padding='same', dilation=3)
         self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.cfloat)
     def test_conv3d_same_padding(self, device, dtype):
         if dtype is torch.cfloat:
@@ -1247,6 +1266,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv3d(x, y, padding='same', dilation=3)
         self.assertEqual(expect, actual, rtol=rtol, atol=atol)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.cfloat)
     def test_conv1d_valid_padding(self, device, dtype):
         # Test F.conv1d padding='valid' is the same as no padding
@@ -1256,6 +1276,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv1d(x, y, padding='valid')
         self.assertEqual(expect, actual)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.cfloat)
     def test_conv2d_valid_padding(self, device, dtype):
         # Test F.conv2d padding='valid' is the same as no padding
@@ -1265,6 +1286,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv2d(x, y, padding='valid')
         self.assertEqual(expect, actual)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.cfloat)
     def test_conv3d_valid_padding(self, device, dtype):
         # Test F.conv3d padding='valid' is the same as no padding
@@ -1274,6 +1296,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         actual = F.conv3d(x, y, padding='valid')
         self.assertEqual(expect, actual)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.cfloat)
     def test_conv1d_same_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='same'
@@ -1303,6 +1326,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.cfloat)
     @tf32_on_and_off(0.001)
     def test_conv2d_same_padding_backward(self, device, dtype):
@@ -1334,6 +1358,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
 
+    @skipPRIVATEUSE1
     @dtypes(torch.double, torch.cdouble)
     def test_conv3d_same_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != 'xla'
@@ -1380,6 +1405,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             gradgradcheck(lambda x, y: F.conv3d(x, y, padding='same'), (x, y),
                           check_fwd_over_rev=True)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.cfloat)
     def test_conv1d_valid_padding_backward(self, device, dtype):
         # Test F.conv1d gradients work with padding='valid'
@@ -1394,6 +1420,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
 
+    @skipPRIVATEUSE1 # npu accuracy bug
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ('valid', 'same'))
@@ -1433,6 +1460,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_even, mode)
             _test(t, weight_odd, mode)
 
+    @skipPRIVATEUSE1 # npu accuracy bug
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ('valid', 'same'))
@@ -1473,6 +1501,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_even, mode)
             _test(t, weight_odd, mode)
 
+    @skipPRIVATEUSE1 # npu accuracy bug
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ('valid', 'same'))
@@ -1518,6 +1547,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             _test(t, weight_even, mode)
             _test(t, weight_odd, mode)
 
+    @dtypesIfPRIVATEUSE1(torch.float)
     @dtypes(torch.float, torch.complex64)
     def test_conv2d_valid_padding_backward(self, device, dtype):
         # Test F.conv2d gradients work with padding='valid'
@@ -1532,6 +1562,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
 
+    @skipPRIVATEUSE1
     @dtypes(torch.double, torch.cdouble)
     def test_conv3d_valid_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != 'xla'
@@ -1551,6 +1582,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         gradcheck(lambda x, y: F.conv3d(x, y, padding='valid'), (x, y), check_forward_ad=check_forward_ad)
         gradgradcheck(lambda x, y: F.conv3d(x, y, padding='valid'), (x, y), check_fwd_over_rev=check_forward_ad)
 
+    @skipPRIVATEUSE1
     @parametrize_test("N", range(2, 4), name_fn=lambda N: f'ConvTranspose{N}d')
     def test_conv_transpose_with_output_size_and_no_batch_dim(self, device, N):
         # For inputs with no batch dim, verify output is the correct shape when output_size is set.
@@ -1562,6 +1594,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         output = m(inp, output_size=output_size)
         self.assertEqual(output.shape, output_size)
 
+    @skipPRIVATEUSE1
     @skipMeta
     @parametrize_test("input_shape,transposed,dilated,groups,layout,backend_expected", [
         # === slow ===
@@ -1695,6 +1728,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # NnpackSpatial, Winograd3x3Depthwise, and Xnnpack2d backends. Testing these
         # requires the ability to gate tests by whether PyTorch is built with USE_MOBILE=1.
     ])
+    @skipPRIVATEUSE1
     # Test with both bias and no bias.
     @parametrize_test("has_bias", [False, True])
     # Test with both stride=1 and stride>1 cases.
@@ -1830,6 +1864,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     y_ = conv(x)
                     self.assertEqual(y, y_)
 
+    @skipPRIVATEUSE1
     @dtypes(torch.float, torch.cfloat)
     def test_conv_empty_channel(self, device, dtype):
         in_channels = 0
@@ -1895,6 +1930,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         input_large = torch.randn(1, 1, 2048, 1024 , dtype=dtype, device=device)
         conv2(input_large)
 
+    @skipPRIVATEUSE1
     def test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):
             for grouped in (False, True):
@@ -2004,6 +2040,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device=device))
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
+    @skipPRIVATEUSE1 # npu accuracy bug
     @onlyCUDAAndPRIVATEUSE1
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
@@ -2023,6 +2060,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
         self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
 
+    @skipPRIVATEUSE1 # npu accuracy bug
     @onlyCUDAAndPRIVATEUSE1
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
@@ -2042,6 +2080,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
         self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
 
+    @skipPRIVATEUSE1
     @onlyCUDAAndPRIVATEUSE1
     def test_ConvTranspose3d_size_1_kernel(self, device):
         with set_default_dtype(torch.double):
@@ -2062,6 +2101,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertEqual(conv_cpu.bias.grad.data, conv_cuda.bias.grad.data, atol=1e-5, rtol=0, exact_device=False)
             self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
 
+    @dtypesIfPRIVATEUSE1(torch.half,torch.float)
     @dtypesIfCUDA(*floating_types_and(torch.half, *[torch.bfloat16] if AMPERE_OR_ROCM else []))
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
@@ -2098,6 +2138,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                          torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
                          atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
+    @unittest.skip("npu not support")
     @dtypes(torch.double, torch.cdouble)
     def test_Conv2d_backward_depthwise(self, device, dtype):
         x = torch.randn(2, 2, 4, 20, device=device, dtype=dtype, requires_grad=True)
